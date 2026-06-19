@@ -242,10 +242,31 @@ def _flank(p: GearParams, n: int) -> List[Point]:
     if r_start >= ra:
         r_start = 0.999 * ra
 
-    # Radial drop from root circle to the base circle (only if root < base).
     if rf < rb - 1e-9:
         ang_base = _half_angle(p, rb, psi_pitch, inv_alpha, rb)
-        pts.append((rf * math.cos(ang_base), -rf * math.sin(ang_base)))
+        rho = max(0.0, p.root_fillet)
+        # A circular fillet tangent to the radial flank and the root circle
+        # smooths the transition (realistic, stress-reducing root).
+        if rho > 1e-6:
+            # Tangent point on the flank (radial line at angle -ang_base).
+            r_tf = math.sqrt(rf * rf + 2.0 * rf * rho)
+            if r_tf < rb:                       # fillet fits below base circle
+                d_ang = math.asin(rho / (rf + rho))
+                psi_c = -ang_base - d_ang       # fillet centre angle (space side)
+                cx = (rf + rho) * math.cos(psi_c)
+                cy = (rf + rho) * math.sin(psi_c)
+                # Tangent points: on root circle (radius rf) and on the flank.
+                t_root = (rf * math.cos(psi_c), rf * math.sin(psi_c))
+                t_flank = (r_tf * math.cos(-ang_base), r_tf * math.sin(-ang_base))
+                a_root = math.atan2(t_root[1] - cy, t_root[0] - cx)
+                a_flank = math.atan2(t_flank[1] - cy, t_flank[0] - cx)
+                for a in linspace(a_root, a_flank, max(4, n // 3)):
+                    pts.append((cx + rho * math.cos(a), cy + rho * math.sin(a)))
+            else:
+                pts.append((rf * math.cos(ang_base), -rf * math.sin(ang_base)))
+        else:
+            # Sharp radial root.
+            pts.append((rf * math.cos(ang_base), -rf * math.sin(ang_base)))
 
     for r in linspace(r_start, ra, n):
         ang = _half_angle(p, r, psi_pitch, inv_alpha, rb)

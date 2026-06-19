@@ -16,7 +16,7 @@ that consecutive layers can be connected.
 from __future__ import annotations
 
 import math
-from typing import List, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 XYZ = Tuple[float, float, float]
 XY = Tuple[float, float]
@@ -94,6 +94,40 @@ class Solid:
             f.point = (px * c - py * s, px * s + py * c, pz)
         return self
 
+    def rotate_axis(self, axis: XYZ, ang: float,
+                    center: XYZ = (0.0, 0.0, 0.0)) -> "Solid":
+        """Rotate about an arbitrary axis through ``center`` (Rodrigues)."""
+        ux, uy, uz = _norm(axis)
+        c, s = math.cos(ang), math.sin(ang)
+        cx, cy, cz = center
+
+        def rot(p: XYZ, translate: bool) -> XYZ:
+            x, y, z = p
+            if translate:
+                x, y, z = x - cx, y - cy, z - cz
+            dot = ux * x + uy * y + uz * z
+            crx = uy * z - uz * y
+            cry = uz * x - ux * z
+            crz = ux * y - uy * x
+            rx = x * c + crx * s + ux * dot * (1 - c)
+            ry = y * c + cry * s + uy * dot * (1 - c)
+            rz = z * c + crz * s + uz * dot * (1 - c)
+            if translate:
+                return (rx + cx, ry + cy, rz + cz)
+            return (rx, ry, rz)
+
+        self.verts = [rot(p, True) for p in self.verts]
+        for f in self.faces:
+            f.normal = rot(f.normal, False)
+            f.point = rot(f.point, True)
+        return self
+
+    def rotate_x(self, ang: float) -> "Solid":
+        return self.rotate_axis((1.0, 0.0, 0.0), ang)
+
+    def rotate_y(self, ang: float) -> "Solid":
+        return self.rotate_axis((0.0, 1.0, 0.0), ang)
+
     def is_closed_manifold(self) -> bool:
         """True if every edge is shared by exactly two faces with opposite
         orientation - i.e. the shell is a closed, orientable manifold.
@@ -131,6 +165,109 @@ class Solid:
         ys = [v[1] for v in self.verts]
         zs = [v[2] for v in self.verts]
         return (min(xs), min(ys), min(zs)), (max(xs), max(ys), max(zs))
+
+
+class Slab:
+    """One axial segment of a stepped solid: stacked outer layers + local holes.
+
+    ``layers`` are ``(z, outer_loop)`` pairs (>=2; multiple allow a twist).
+    ``holes`` are inner loops local to this slab (e.g. spoke openings) that are
+    capped at the slab's two ends.
+    """
+
+    def __init__(self, layers: List[Tuple[float, List[XY]]],
+                 holes: Optional[List[List[XY]]] = None):
+        self.layers = layers
+        self.holes = holes or []
+
+    @property
+    def z0(self) -> float:
+        return self.layers[0][0]
+
+    @property
+    def z1(self) -> float:
+        return self.layers[-1][0]
+
+
+def _wall(solid: Solid, lo: List[int], hi: List[int]) -> None:
+    m = len(lo)
+    for i in range(m):
+        a, b = lo[i], lo[(i + 1) % m]
+        c, d = hi[(i + 1) % m], hi[i]
+        solid.add_triangle(a, b, c)
+        solid.add_triangle(a, c, d)
+
+
+def build_stepped(slabs: Sequence["Slab"], through_holes: Sequence[List[XY]],
+                  name: str = "solid") -> Solid:
+    """Build a solid from stacked slabs of differing outer profile.
+
+    ``through_holes`` (e.g. the bore) run straight through every slab.  Each
+    slab may carry its own local holes (e.g. spoke openings) that terminate at
+    the slab boundaries.  A planar step face joins consecutive slabs; the
+    smaller outer profile must lie inside the larger one.
+    """
+    from .geometry import polygon_area
+    solid = Solid(name)
+    z_min = slabs[0].z0
+    z_max = slabs[-1].z1
+
+    # Through-holes: one straight wall + shared bottom/top loops.
+    th_lo: List[List[int]] = []
+    th_hi: List[List[int]] = []
+    for hole in through_holes:
+        lo = [solid.add_vertex((x, y, z_min)) for (x, y) in hole]
+        hi = [solid.add_vertex((x, y, z_max)) for (x, y) in hole]
+        th_lo.append(lo)
+        th_hi.append(hi)
+        _wall(solid, lo, hi)
+
+    # Outer side walls + local-hole walls within every slab.
+    for slab in slabs:
+        oidx = [[solid.add_vertex((x, y, z)) for (x, y) in loop]
+                for (z, loop) in slab.layers]
+        for l in range(len(slab.layers) - 1):
+            _wall(solid, oidx[l], oidx[l + 1])
+        for hole in slab.holes:
+            lo = [solid.add_vertex((x, y, slab.z0)) for (x, y) in hole]
+            hi = [solid.add_vertex((x, y, slab.z1)) for (x, y) in hole]
+            _wall(solid, lo, hi)
+
+    # Step faces between consecutive slabs.  Orient each loop by signed area:
+    # for a +Z face the outer bound winds CCW (area>0) and holes CW (area<0);
+    # for a -Z face the senses flip.
+    def oriented(loop_xy: List[XY], z: float, want_ccw: bool) -> List[int]:
+        seq = loop_xy if (polygon_area(loop_xy) > 0) == want_ccw \
+            else list(reversed(loop_xy))
+        return [solid.add_vertex((x, y, z)) for (x, y) in seq]
+
+    for s in range(len(slabs) - 1):
+        z = slabs[s].z1
+        lower, upper = slabs[s].layers[-1][1], slabs[s + 1].layers[0][1]
+        if abs(polygon_area(lower)) >= abs(polygon_area(upper)):
+            outer, smaller, nz = lower, upper, 1.0
+        else:
+            outer, smaller, nz = upper, lower, -1.0
+        outer_ccw = nz > 0                      # outer-bound target winding
+        loops = [oriented(outer, z, outer_ccw)]
+        for inner in [smaller] + slabs[s].holes + slabs[s + 1].holes:
+            loops.append(oriented(inner, z, not outer_ccw))
+        solid.add_face(loops, (0.0, 0.0, nz), (0.0, 0.0, z))
+
+    # Bottom cap (CCW about -Z => reverse every loop).
+    bot_outer = [solid.add_vertex((x, y, z_min)) for (x, y) in slabs[0].layers[0][1]]
+    bot_holes = th_lo + [[solid.add_vertex((x, y, z_min)) for (x, y) in h]
+                         for h in slabs[0].holes]
+    bottom = [list(reversed(bot_outer))] + [list(reversed(h)) for h in bot_holes]
+    solid.add_face(bottom, (0.0, 0.0, -1.0), (0.0, 0.0, z_min))
+
+    # Top cap (loops as stored about +Z).
+    top_outer = [solid.add_vertex((x, y, z_max)) for (x, y) in slabs[-1].layers[-1][1]]
+    top_holes = th_hi + [[solid.add_vertex((x, y, z_max)) for (x, y) in h]
+                         for h in slabs[-1].holes]
+    top = [list(top_outer)] + [list(h) for h in top_holes]
+    solid.add_face(top, (0.0, 0.0, 1.0), (0.0, 0.0, z_max))
+    return solid
 
 
 def build_extrusion(layers: Sequence[Tuple[float, List[List[XY]]]],

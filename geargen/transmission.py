@@ -129,9 +129,9 @@ class GearPair:
         wheel.rotate_z(self.wheel_phase()).translate(a, 0.0, 0.0)
         return [pinion, wheel]
 
-    def report(self, input_rpm: float = 1500.0,
-               input_torque: float = 10.0) -> dict:
-        return {
+    def report(self, input_rpm: float = 1500.0, input_torque: float = 10.0,
+               with_forces: bool = True) -> dict:
+        rep = {
             "type": "internal" if self.internal else "external",
             "module": self.pinion.module,
             "z_pinion": self.pinion.z,
@@ -145,6 +145,11 @@ class GearPair:
             "input_torque_Nm": input_torque,
             "output_torque_Nm": round(self.output_torque(input_torque), 4),
         }
+        if with_forces:
+            from .engineering import analyse_mesh
+            rep["pinion_analysis"] = analyse_mesh(
+                self.pinion, input_rpm, torque_Nm=input_torque).as_dict()
+        return rep
 
 
 @dataclass
