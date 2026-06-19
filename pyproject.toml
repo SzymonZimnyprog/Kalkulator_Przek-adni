@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geargen"
+version = "1.0.0"
+description = "Involute gear & transmission generator with STEP/DXF/SVG (CAD) export — pure Python, zero dependencies."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "BSD-2-Clause" }
+authors = [{ name = "Szymonprog" }]
+keywords = ["gear", "involute", "STEP", "CAD", "transmission", "spur", "helical", "przekladnia"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: BSD License",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Multimedia :: Graphics :: 3D Modeling",
+]
+dependencies = []
+
+[project.optional-dependencies]
+# Only needed to *verify* generated STEP files against OpenCASCADE; the
+# generator itself has no dependencies.
+verify = ["cadquery>=2.0"]
+
+[project.scripts]
+geargen = "geargen.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/szymonzimnyprog/kalkulator_przek-adni"
+
+[tool.setuptools]
+packages = ["geargen"]
