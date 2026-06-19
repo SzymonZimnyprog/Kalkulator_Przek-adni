@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+.pytest_cache/
+.venv/
+venv/
+
+# Generated CAD / output artifacts
+output/
+*.step
+*.stp
+*.dxf
+!examples/**/*.dxf
+
+# OS
+.DS_Store

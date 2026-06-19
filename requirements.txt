@@ -1,0 +1,8 @@
+# geargen has NO runtime dependencies — it runs on pure Python 3.8+.
+#
+# The package below is OPTIONAL and only used to verify generated STEP files
+# against the OpenCASCADE kernel (see tests / README). Install it with:
+#
+#     pip install -r requirements.txt
+#
+cadquery>=2.0 ; python_version >= "3.9"
