@@ -74,11 +74,15 @@ class GearBuild:
     spokes: Optional[Spokes] = None
     hub: Optional[Hub] = None
     herringbone: bool = False
+    generated: bool = False                           # use envelope (hob) method
     flank_pts: int = 18
     arc_pts: int = 6
     bore_seg: int = 64
     max_twist_per_layer: float = 4.0
     rim_for_internal: float = 4.0
+    gen_rolls: int = 600
+    gen_bins: int = 240
+    gen_points: int = 60
 
 
 # --------------------------------------------------------------------------- #
@@ -207,6 +211,15 @@ class Gear:
                 holes.append(_circle_hole(cx, cy, lh.diameter / 2.0))
         return holes
 
+    def _profile(self):
+        """Outer involute profile (analytic or numerically generated)."""
+        p, b = self.params, self.build
+        if b.generated and not p.internal:
+            from .generating import generated_gear_profile
+            return generated_gear_profile(p, b.gen_rolls, b.gen_bins,
+                                          b.gen_points)
+        return gear_profile(p, b.flank_pts, b.arc_pts)
+
     def _outer_and_internal(self):
         """Return (outer_loop, internal_tooth_hole_or_None, twist_outer?)."""
         p, b = self.params, self.build
@@ -215,7 +228,17 @@ class Gear:
             outer = circle_polygon(rim_r, max(96, p.z * 4), cw=False)
             tooth = _as_hole(gear_profile(p, b.flank_pts, b.arc_pts))
             return outer, tooth, False
-        return gear_profile(p, b.flank_pts, b.arc_pts), None, True
+        return self._profile(), None, True
+
+    def section_loops(self) -> List[List[XY]]:
+        """The 2-D cross-section as a list of loops (outer CCW first, then holes
+        CW): exactly what a 2-D CNC / laser / DXF toolpath needs."""
+        outer, tooth, _ = self._outer_and_internal()
+        loops = [clean_loop(outer)]
+        if tooth is not None:
+            loops.append(clean_loop(tooth))
+        loops += [clean_loop(h) for h in self._bore_holes() + self._web_holes()]
+        return loops
 
     # -- twist profile ----------------------------------------------------- #
     def _twist_schedule(self):

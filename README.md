@@ -69,6 +69,59 @@ wyjściowe.
 
 ---
 
+## 🔢 Numeryczny generator + CNC / Numerical generator + CNC
+
+**Metoda obwiedniowa (envelope / hob).** Zamiast wzoru ewolwenty, zarys
+powstaje przez **numeryczną symulację obróbki**: zębatka-narzędzie toczy się
+bez poślizgu po kole, a profil zęba jest obwiednią jej kolejnych położeń. Daje
+to rzeczywisty kształt: **trochoidalną stopę zęba** i **podcięcie (undercut)**
+dla małej liczby zębów (wykrywane automatycznie).
+
+<p align="center">
+  <img src="docs/generated_vs_analytic.png" width="78%" alt="Analityczny vs numerycznie generowany (z podcięciem)"/><br>
+  <sub>Po lewej zarys analityczny, po prawej numerycznie generowany (z=12) — widać <b>podcięcie</b> u podstawy zębów.</sub>
+</p>
+
+**Wyjście CNC (sterowanie numeryczne).** Z dowolnego koła generowane są programy
+obróbcze G-code:
+
+- **WEDM** — wycinarka drutowa (najdokładniejsza dla kół zębatych),
+- **Frezarka 2.5D** — wielowarstwowo, z kompensacją promienia (G41/G42),
+- **Laser / plazma / grawer** — cięcie konturu 2D.
+
+…oraz **tablice współrzędnych** (CSV / JSON) zarysu zęba (do CMM, MES/FEM).
+
+<p align="center">
+  <img src="docs/cnc_toolpath.png" width="50%" alt="Ścieżka narzędzia WEDM"/><br>
+  <sub>Ścieżka WEDM: kontur cięcia (z podcięciem i rowkiem) + punkty przebicia i najazdy.</sub>
+</p>
+
+```bash
+# G-code WEDM z profilu generowanego numerycznie + tablice CSV/JSON
+python -m geargen cnc -m 2 -z 14 --process wedm --generated \
+       --bore 10 --keyway 4x1.8 -o kolo.wedm.nc --csv kolo.csv --json kolo.json
+
+# Frezowanie 2.5D (głębokość 8, 1.5/przejście, frez Ø3, kompensacja w lewo)
+python -m geargen cnc -m 3 -z 24 --process mill --depth 8 --doc 1.5 --tool 3 --comp left -o kolo.mill.nc
+
+# Laser (z wykryciem podcięcia dla z=10)
+python -m geargen cnc -m 2 -z 10 --process laser --generated -o kolo.laser.nc
+
+# Koło do przekładni z profilem generowanym numerycznie (STEP)
+python -m geargen gear -m 2 -z 12 --generated --bore 8 -o kolo_gen.step
+```
+
+```python
+from geargen import generate_profile, Gear, GearParams, GearBuild, cnc
+res = generate_profile(m=2, z=12, pressure_angle=20)
+print(res.undercut)                              # True (z < z_min ~ 17)
+
+g = Gear(GearParams(2, 20, face_width=8), GearBuild(bore=10, generated=True))
+cnc.write_gcode(cnc.gcode_wedm(g.section_loops()), "kolo.nc")
+```
+
+---
+
 ## 🚀 Szybki start (CLI)
 
 ```bash
@@ -165,7 +218,7 @@ Pełne przykłady w katalogu [`examples/`](examples/) (01–10).
 ## 🧪 Testy i weryfikacja
 
 ```bash
-python -m unittest discover -s tests -v      # 38 testów, zero zależności
+python -m unittest discover -s tests -v      # 49 testów, zero zależności
 ```
 
 Każda bryła ma test wodoszczelności bez CAD-a:
@@ -208,11 +261,13 @@ geargen/
   bevel.py         koła i przekładnia stożkowa
   worm.py          ślimak i przekładnia ślimakowa
   rack.py          zębatka i przekładnia zębatkowa
+  generating.py    numeryczna metoda obwiedniowa (trochoida, undercut)
+  cnc.py           G-code (WEDM / frezarka / laser) + eksport CSV/JSON
   engineering.py   siły, naprężenia Lewisa, prędkości, moc
   report.py        arkusz danych, eksport DXF i SVG
   cli.py           interfejs wiersza poleceń
-examples/          przykłady 01–10
-tests/             testy jednostkowe (38)
+examples/          przykłady 01–11
+tests/             testy jednostkowe (49)
 ```
 
 ## 📜 Licencja

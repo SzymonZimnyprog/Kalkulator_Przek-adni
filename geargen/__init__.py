@@ -26,8 +26,10 @@ from .bevel import BevelGear, BevelParams, BevelPair
 from .worm import Worm, WormParams, WormDrive
 from .rack import Rack, RackParams, RackAndPinion
 from .engineering import analyse_mesh, MeshAnalysis
+from .generating import generate_profile, generated_gear_profile, GenerationResult
+from . import cnc
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 __all__ = [
     # core
@@ -44,5 +46,7 @@ __all__ = [
     "Rack", "RackParams", "RackAndPinion",
     # analysis
     "analyse_mesh", "MeshAnalysis",
+    # numerical generation + CNC
+    "generate_profile", "generated_gear_profile", "GenerationResult", "cnc",
     "__version__",
 ]

@@ -96,8 +96,10 @@ def _gear_build(args) -> GearBuild:
         spokes=_spokes(getattr(args, "spokes", None)),
         hub=_hub(getattr(args, "hub", None)),
         herringbone=getattr(args, "herringbone", False),
-        flank_pts=args.flank_pts,
-        arc_pts=args.arc_pts,
+        generated=getattr(args, "generated", False),
+        gen_points=getattr(args, "gen_points", 60),
+        flank_pts=getattr(args, "flank_pts", 18),
+        arc_pts=getattr(args, "arc_pts", 6),
     )
 
 
@@ -136,6 +138,8 @@ def _common_gear_opts(sp):
 def cmd_gear(args):
     p = _gear_params(args)
     print(datasheet(p, f"GEAR  z={args.teeth}  m={args.module:g}"))
+    if getattr(args, "generated", False):
+        print(f"  [profile] numerically generated (envelope / hob method)")
     out = args.out or f"gear_z{p.z}_m{args.module:g}.step"
     write_step(Gear(p, _gear_build(args)).to_solid(), out, f"gear_z{p.z}")
     print(f"\n  [STEP] {out}")
@@ -236,6 +240,42 @@ def cmd_rack(args):
     return 0
 
 
+def cmd_cnc(args):
+    from . import cnc
+    from .generating import generate_profile
+    p = _gear_params(args)
+    g = Gear(p, _gear_build(args))
+    loops = g.section_loops()
+    title = f"GEAR z{p.z} m{args.module:g}"
+    default_feed = {"wedm": 2.0, "mill": 300.0, "laser": 600.0}[args.process]
+    feed = args.feed if args.feed is not None else default_feed
+    if args.process == "wedm":
+        text = cnc.gcode_wedm(loops, title, feed=feed, comp=args.comp)
+    elif args.process == "mill":
+        text = cnc.gcode_mill(loops, title, depth=args.depth, doc=args.doc,
+                              tool_d=args.tool, feed=feed, comp=args.comp)
+    else:
+        text = cnc.gcode_laser(loops, title, feed=feed, power=args.power,
+                               passes=args.passes)
+    out = args.out or f"gear_z{p.z}_{args.process}.nc"
+    cnc.write_gcode(text, out)
+    res = generate_profile(p.module / __import__("math").cos(p.beta), p.z,
+                           p.pressure_angle, p.profile_shift, rolls=200, bins=120)
+    print(f"  CNC PROGRAM  ({args.process.upper()})")
+    print(f"  teeth z={p.z}  module m={args.module:g}  contours={len(loops)}")
+    print(f"  undercut: {'YES (consider profile shift)' if res.undercut else 'no'}")
+    print(f"\n  [G-code] {out}  ({text.count(chr(10))} lines)")
+    if args.csv:
+        cnc.to_csv(loops, args.csv)
+        print(f"  [CSV   ] {args.csv}")
+    if args.json:
+        cnc.to_json({"module": args.module, "teeth": args.teeth,
+                     "process": args.process, "generated": args.generated},
+                    loops, args.json)
+        print(f"  [JSON  ] {args.json}")
+    return 0
+
+
 def cmd_info(args):
     p = _gear_params(args)
     if args.json:
@@ -277,6 +317,10 @@ def build_parser():
                    help="teeth (negative = internal/ring gear)")
     g.add_argument("--fillet", type=float, default=0.0, help="root fillet radius (mm)")
     g.add_argument("--herringbone", action="store_true", help="double-helical")
+    g.add_argument("--generated", action="store_true",
+                   help="numerically generate the profile (envelope/hob method)")
+    g.add_argument("--gen-points", type=int, default=60,
+                   help="points per tooth for the generated profile")
     g.add_argument("--bore", type=float, default=0.0)
     g.add_argument("--keyway", help="WIDTHxDEPTH")
     g.add_argument("--spline", help="COUNT,MINOR_DIA,MAJOR_DIA")
@@ -360,6 +404,31 @@ def build_parser():
     rk.add_argument("--rpm", type=float, default=100.0)
     rk.add_argument("--out", "-o")
     rk.set_defaults(func=cmd_rack)
+
+    cn = sub.add_parser("cnc", help="numerical-control output (G-code, CSV, JSON)")
+    _common_gear_opts(cn)
+    cn.add_argument("--teeth", "-z", type=int, required=True)
+    cn.add_argument("--process", choices=["wedm", "mill", "laser"], default="wedm")
+    cn.add_argument("--fillet", type=float, default=0.0)
+    cn.add_argument("--generated", action="store_true",
+                    help="numerically generate the profile (recommended for CNC)")
+    cn.add_argument("--gen-points", type=int, default=120,
+                    help="points per tooth (higher = smoother toolpath)")
+    cn.add_argument("--bore", type=float, default=0.0)
+    cn.add_argument("--keyway", help="WIDTHxDEPTH")
+    cn.add_argument("--holes", help="lightening COUNT,DIA,PITCHCIRCLE")
+    cn.add_argument("--feed", type=float, default=None, help="feed rate")
+    cn.add_argument("--comp", choices=["none", "left", "right"], default="none",
+                    help="cutter/wire radius compensation (G41/G42)")
+    cn.add_argument("--depth", type=float, default=5.0, help="mill: total depth")
+    cn.add_argument("--doc", type=float, default=1.0, help="mill: depth per pass")
+    cn.add_argument("--tool", type=float, default=2.0, help="mill: tool diameter")
+    cn.add_argument("--power", type=int, default=800, help="laser: power S-value")
+    cn.add_argument("--passes", type=int, default=1, help="laser: number of passes")
+    cn.add_argument("--csv", help="also write a coordinate CSV")
+    cn.add_argument("--json", help="also write a coordinate JSON")
+    cn.add_argument("--out", "-o")
+    cn.set_defaults(func=cmd_cnc)
 
     inf = sub.add_parser("info", help="print a gear data sheet")
     _common_gear_opts(inf)
